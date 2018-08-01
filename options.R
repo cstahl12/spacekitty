@@ -1,4 +1,4 @@
-library(quantmod)
+library(tidyquant)
 library(FatTailsR)
 library(fitteR)
 library(ggplot2)
@@ -7,35 +7,37 @@ library(dplyr)
 library(tidyr)
 
 date_from <- "2011-07-01"
-date_to <- "2018-07-27"
+date_to <- "2018-07-31"
 
-suppressMessages(getSymbols("PANW", from=date_from, to=date_to, src="yahoo", adjust=TRUE))  
-stock <- PANW$PANW.Adjusted
+prices <- tq_get("SPLK", get = "stock.prices", from=date_from, to=date_to)
 
-colnames(stock) <- c("Price")
-stock$Ret <- dailyReturn(stock$Price)
-start_price <- as.numeric(stock$Price[nrow(stock)])
+rets <- prices %>%
+  tq_transmute(select     = adjusted, 
+               mutate_fun = periodReturn, 
+               period     = "daily", 
+               col_rename = "ret")
 
-trials <- 10000
-days <- 500
+start_price <- as.numeric(prices$adjusted[nrow(prices)])
 
-mu <- mean(stock$Ret)
-sigma <- sd(stock$Ret)
+trials <- 100000
+days <- 20
+
+mu <- mean(rets$ret)
+sigma <- sd(rets$ret)
 annual_vol <- sigma * sqrt(251)
 
-f <- paramkienerX(stock$Ret)
+f <- paramkienerX(rets$ret)
 ret_paths <- matrix(nrow = days, ncol = trials)
 
-dist1 <- data.frame(dist = "Emp", rets = rkiener2(100000, m = f[1], g = f[2], a = f[3], w = f[4]))
-dist2 <- data.frame(dist = "Zero", rets = rkiener2(100000, m = 0, g = f[2], a = f[3], w = f[4]))
-dists <- rbind(dist1, dist2)
+#dist1 <- data.frame(dist = "Emp", rets = rkiener2(100000, m = f[1], g = f[2], a = f[3], w = f[4]))
+#dist2 <- data.frame(dist = "Zero", rets = rkiener2(100000, m = 0, g = f[2], a = f[3], w = f[4]))
+#dists <- rbind(dist1, dist2)
 
 # visualize the fit distribution
-ggplot() +
-  geom_histogram(bins = 1000, data = dist1, aes(x = `rets`), colour = 'red', alpha = 0.25) +
-  geom_histogram(bins = 100, data = stock, aes(x = `Ret`), colour = 'blue') +
-  xlim(-.30, .3)
-
+# ggplot() +
+#  geom_histogram(bins = 1000, data = dist1, aes(x = `rets`), colour = 'red', alpha = 0.25) +
+#  geom_histogram(bins = 100, data = stock, aes(x = `Ret`), colour = 'blue') +
+#  xlim(-.30, .3)
 
 for(i in c(1:days)){
   ret_paths[i,] <- rkiener2(trials, m = 0, g = f[2], a = f[3], w = f[4])
@@ -51,13 +53,10 @@ df_tidy <- df_ret %>%
   mutate(path = (start_price * (1 + cumsum(`value`)))) %>%
   mutate(day = c(1:days))
 
-#ggplot(data = df_tidy) +
-  #geom_line(aes(x=day, y=path, colour=key))
+strike <- 109
+discount <- ((1 + 0.04) ^ (days/251))
 
-strike <- 75
-discount <- ((1 + 0.05) ^ (days/251))
-
-call <- FALSE
+call <- TRUE
 
 df_results <- df_tidy %>%
   filter(`day` == days)
