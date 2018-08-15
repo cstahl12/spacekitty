@@ -5,11 +5,13 @@ library(ggplot2)
 library(purrr)
 library(dplyr)
 library(tidyr)
+library(lubridate)
 
 date_from <- "2011-07-01"
-date_to <- "2018-07-31"
+date_to <- "2018-08-13"
+date_strike <- "2020-01-01"
 
-prices <- tq_get("SPLK", get = "stock.prices", from=date_from, to=date_to)
+prices <- tq_get("AMD", get = "stock.prices", from=date_from, to=date_to)
 
 rets <- prices %>%
   tq_transmute(select     = adjusted, 
@@ -19,14 +21,16 @@ rets <- prices %>%
 
 start_price <- as.numeric(prices$adjusted[nrow(prices)])
 
-trials <- 100000
-days <- 20
+trials <- 10000
+days <- ((as.numeric(days(ymd(date_strike) - ymd(date_to))) / 60 / 60 / 24) / 365) * 252
+days <- round(days, digits = 0)
 
 mu <- mean(rets$ret)
 sigma <- sd(rets$ret)
 annual_vol <- sigma * sqrt(251)
 
-f <- paramkienerX(rets$ret)
+f <- regkienerLX(rets$ret, model = "K4")
+
 ret_paths <- matrix(nrow = days, ncol = trials)
 
 #dist1 <- data.frame(dist = "Emp", rets = rkiener2(100000, m = f[1], g = f[2], a = f[3], w = f[4]))
@@ -40,8 +44,11 @@ ret_paths <- matrix(nrow = days, ncol = trials)
 #  xlim(-.30, .3)
 
 for(i in c(1:days)){
-  ret_paths[i,] <- rkiener2(trials, m = 0, g = f[2], a = f[3], w = f[4])
-  # ret_paths[i,] <- rnorm(trials, mean = 0, sd = sigma)
+  ret_paths[i,] <- rkiener4(trials,
+                            m = f$coefk4["m"],
+                            g = f$coefk4["g"],
+                            k = f$coefk4["k"],
+                            e = f$coefk4["e"])
 }
 
 df_ret <- data.frame(ret = ret_paths)
@@ -53,8 +60,8 @@ df_tidy <- df_ret %>%
   mutate(path = (start_price * (1 + cumsum(`value`)))) %>%
   mutate(day = c(1:days))
 
-strike <- 109
-discount <- ((1 + 0.04) ^ (days/251))
+strike <- 30
+discount <- ((1 + 0.04) ^ (days/252))
 
 call <- TRUE
 
@@ -72,3 +79,8 @@ df_results$`dcf` <- df_results$`cash flow` / discount
 
 sum(df_results$`dcf`) / trials
 
+ret_labels <- unique(df_tidy$key)
+
+ggplot(data = df_tidy %>% filter(`key` %in% ret_labels[1:50])) +
+  geom_line(aes(x = `day`, y = `path`, colour = `key`))
+  
